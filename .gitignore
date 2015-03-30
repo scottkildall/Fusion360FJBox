@@ -1,0 +1,10 @@
+#########################
+# Python patterns
+#########################
+
+# Compiled Python scripts
+*.pyc
+*.py~
+
+# OSX
+.DS_Store

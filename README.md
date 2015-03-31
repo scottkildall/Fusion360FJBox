@@ -14,7 +14,7 @@ Known issues:
 * Group components into a single body
 * Line up box edges
 * Actual finger joints
-* Dialog box, include Add top and Add Bottom option
+* Dialog box, include Kerf, Add top and Add Bottom option
 
 
 

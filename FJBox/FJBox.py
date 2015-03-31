@@ -1,7 +1,32 @@
 #Author-Scott Kildall
-#Description-Finger Joint Box for Fusion 360
+#Description-Create a finger-joint box.
 
-import adsk.core, adsk.fusion
+import adsk.core, adsk.fusion, traceback
+import os, math
+
+# global set of event handlers to keep them referenced for the duration of the command
+handlers = []
+
+app = adsk.core.Application.get()
+if app:
+    ui = app.userInterface
+
+defaultWidth = 12
+defaultHeight = 6
+defaultDepth = 3
+defaultThickness = .1
+
+newComp = None
+
+def createNewComponent():
+    # Get the active design.
+    product = app.activeProduct
+    design = adsk.fusion.Design.cast(product)
+    rootComp = design.rootComponent
+    allOccs = rootComp.occurrences
+    newOcc = allOccs.addNewComponent(adsk.core.Matrix3D.create())
+    return newOcc.component
+
 
 # width = x
 # depth = z
@@ -73,33 +98,138 @@ def extrudeSketch(rootComp,sketch,th):
          # Create the extrusion.
         ext = extrudes.add(extInput)
 
-def getUI():
-    app = adsk.core.Application.get()
-    ui = app.userInterface
-    return ui
-    
-def main():
-    ui = None
-    try: 
-        app = adsk.core.Application.get()
-        ui = app.userInterface
-        
-        design = app.activeProduct
-        if not design:
-            ui.messageBox('No active Fusion design', 'No Design')
-            return
+#---- FJBOx -- END
+class FJBoxCommandExecuteHandler(adsk.core.CommandEventHandler):
+    def __init__(self):
+        super().__init__()
+    def notify(self, args):
+        try:
+            unitsMgr = app.activeProduct.unitsManager
+            command = args.firingEvent.sender
+            inputs = command.commandInputs
 
-        # Get the root component of the active design.
-        rootComp = design.rootComponent
+            widthInput = 0
+            heightInput = 0
+            depthInput = 0
+            thicknessInput = 0
+
+            # We need access to the inputs within a command during the execute.
+            for input in inputs:
+                if input.id == 'widthInput':
+                    widthInput = input
+                elif input.id == 'heightInput':
+                    heightInput = input
+                elif input.id == 'depthInput':
+                    depthInput = input
+                elif input.id == 'thicknessInput':
+                    thicknessInput = input
+
+            width = 0
+            height = 0
+            depth = 0
+            thickness = 0
+
+            if not widthInput or not heightInput or not depthInput or not thicknessInput:
+                ui.messageBox("One of the inputs don't exist.")
+
+                width = defaultWidth
+                height = defaultHeight
+                depth = defaultDepth
+                thickness = defaultThickness
+            else:
+                width = unitsMgr.evaluateExpression(widthInput.expression, "cm")
+                height = unitsMgr.evaluateExpression(heightInput.expression, "cm")
+                depth = unitsMgr.evaluateExpression(depthInput.expression, "cm")
+                thickness = unitsMgr.evaluateExpression(thicknessInput.expression, "cm")
+            
+            design = app.activeProduct
+            if not design:
+                ui.messageBox('No active Fusion design', 'No Design')
+                return
+            
+            # Get the root component of the active design.
+            rootComp = design.rootComponent
         
-        # get input from user here
-        w = 12  # x = 120mm
-        h = 6   # y = 60mm
-        d = 3   # z = 30mnm
-        th = .1
-        buildBox(rootComp, w,h,d,th)
-    except Exception as error:
-        ui.messageBox('Failed : ' + str(error))     
+            # build from user input
+            buildBox(rootComp, width,height,depth,thickness)
         
+        except:
+            if ui:
+                ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
+
+class FJBoxCommandDestroyHandler(adsk.core.CommandEventHandler):
+    def __init__(self):
+        super().__init__()
+    def notify(self, args):
+        try:
+            # when the command is done, terminate the script
+            # this will release all globals which will remove all event handlers
+            adsk.terminate()
+        except:
+            if ui:
+                ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
+
+class FJBoxCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):    
+    def __init__(self):
+        super().__init__()        
+    def notify(self, args):
+        try:
+            cmd = args.command
+            onExecute = FJBoxCommandExecuteHandler()
+            cmd.execute.add(onExecute)
+            onDestroy = FJBoxCommandDestroyHandler()
+            cmd.destroy.add(onDestroy)
+            # keep the handler referenced beyond this function
+            handlers.append(onExecute)
+            handlers.append(onDestroy)
+
+            # Define the inputs.
+            inputs = cmd.commandInputs
+
+            initialVal = adsk.core.ValueInput.createByReal(defaultWidth)
+            inputs.addValueInput('widthInput', 'Width (cm)', 'cm' , initialVal)
+
+            initialVal2 = adsk.core.ValueInput.createByReal(defaultHeight)
+            inputs.addValueInput('heightInput', 'Height (cm)', 'cm' , initialVal2)
+            
+            initialVal3 = adsk.core.ValueInput.createByReal(defaultDepth)
+            inputs.addValueInput('depthInput', 'Depth (cm)', 'cm' , initialVal3)
+            
+            initialVal4 = adsk.core.ValueInput.createByReal(defaultThickness)
+            inputs.addValueInput('thicknessInput', 'Wall Thickness', 'cm' , initialVal4)
+
+
+        except:
+            if ui:
+                ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
+
+
+
+
+
+def main():
+    try:
+        commandId = 'FJBox'
+        commandName = 'Create Finger-Joint Box'
+        commandDescription = 'Create a finger-joint box'
+        cmdDef = ui.commandDefinitions.itemById(commandId)
+        if not cmdDef:
+            resourceDir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'resources') # absolute resource file path is specified
+            cmdDef = ui.commandDefinitions.addButtonDefinition(commandId, commandName, commandDescription, resourceDir)
+
+        onCommandCreated = FJBoxCommandCreatedHandler()
+        cmdDef.commandCreated.add(onCommandCreated)
+        # keep the handler referenced beyond this function
+        handlers.append(onCommandCreated)
+
+        inputs = adsk.core.NamedValues.create()
+        cmdDef.execute(inputs)
+
+        # prevent this module from being terminate when the script returns, because we are waiting for event handlers to fire
+        adsk.autoTerminate(False)
+
+    except:
+        if ui:
+            ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
 
 main()
